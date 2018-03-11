@@ -10,42 +10,48 @@ import (
 )
 
 // OnMessageCallback is called once for each message received.
-type OnMessageCallback func(message *Message)
+type OnMessageCallback func(message *Message) error
 
 // QueueConsumer consumes a given queue.
 type QueueConsumer struct {
-	Name         string
-	QueueConfig  *QueueConfig
-	Error        error
-	once         sync.Once
-	shutdownChan chan (bool)
-	isDead       bool
+	Name        string
+	QueueConfig *QueueConfig
+	Error       error
+	startOnce   sync.Once
+	stopOnce    sync.Once
+	stopChan    chan (bool)
 }
 
 // NewQueueConsumer creates a QueueConsumer.
 func NewQueueConsumer(queueConfig *QueueConfig) *QueueConsumer {
-	return &QueueConsumer{Name: uuid.NewV4().String(), QueueConfig: queueConfig, shutdownChan: make(chan (bool)), isDead: false}
+	return &QueueConsumer{Name: uuid.NewV4().String(), QueueConfig: queueConfig, stopChan: make(chan (bool))}
 }
 
-// Consume subscribes to a queue then blocks until Shutdown() is called.
-func (qc *QueueConsumer) Consume(callback OnMessageCallback) {
-	if qc.isDead {
-		qc.Error = fmt.Errorf("[consumer:%v] Consume() called for dead consumer", qc.Name)
-		return
-	}
+// Start will connect to the queue & start consuming messages.
+func (qc *QueueConsumer) Start(callback OnMessageCallback) {
+	qc.startOnce.Do(func() {
+		qc.consume(callback)
+	})
+}
 
-	log.Printf("[consumer:%v] consumer is alive", qc.Name)
+// Stop will stop the consumer & close its connection to the queue.
+func (qc *QueueConsumer) Stop() {
+	qc.stopOnce.Do(func() {
+		qc.stopChan <- true
+	})
+}
 
-	// create a rabbitMQ connection:
+func (qc *QueueConsumer) consume(callback OnMessageCallback) {
+	log.Printf("[consumer:%v] started consuming", qc.Name)
+
 	config := qc.QueueConfig
 	connection, err := amqp.Dial(config.ConnectionString())
 	if err != nil {
-		qc.Error = fmt.Errorf("[consumer:%v] failed to connect to RabbitMQ server using connection string: %v. error: %v", qc.Name, config.ConnectionString(), err)
+		qc.Error = fmt.Errorf("[consumer:%v] failed to connect to RabbitMQ server.  error: %v", qc.Name, err)
 		return
 	}
 	defer connection.Close()
 
-	// create a rabbitMQ channel:
 	channel, err := connection.Channel()
 	if err != nil {
 		qc.Error = fmt.Errorf("[consumer:%v] failed to open a channel: %v", qc.Name, err)
@@ -53,14 +59,13 @@ func (qc *QueueConsumer) Consume(callback OnMessageCallback) {
 	}
 	defer channel.Close()
 
-	// create a rabbitMQ queue:
 	queue, err := channel.QueueDeclare(config.Name, config.Durable, config.AutoDelete, config.Exclusive, config.NoWait, config.Arguments)
 	if err != nil {
 		qc.Error = fmt.Errorf("[consumer:%v] failed to declare a queue: %v", qc.Name, err)
 		return
 	}
 
-	// create a go messageChan for consuming:
+	// create & consume a message chan from amqp:
 	messageChan, err := channel.Consume(
 		queue.Name,
 		"",
@@ -75,23 +80,20 @@ func (qc *QueueConsumer) Consume(callback OnMessageCallback) {
 		return
 	}
 
-	// start a go routine to consume to the messageChan:
 	go func() {
 		for delivery := range messageChan {
 			log.Printf("[consumer:%v] received delivery: %v", qc.Name, delivery)
-			callback(NewMessage(delivery))
+			err := callback(NewMessage(delivery))
+			if err != nil {
+				log.Printf("[consumer:%v] stopping per caught an error from the callback: %v", qc.Name, err)
+				qc.Error = err
+				qc.Stop()
+			}
 		}
 	}()
 
-	// block until Shutdown() is called:
-	<-qc.shutdownChan
-}
-
-// Shutdown will stop the consumer & close the connections to the queue.
-func (qc *QueueConsumer) Shutdown() {
-	qc.once.Do(func() {
-		qc.shutdownChan <- true
-		qc.isDead = true
-		log.Printf("[consumer:%v] consumer is dead.", qc.Name)
-	})
+	// block until Shutdown() is called which sends to this channel:
+	<-qc.stopChan
+	close(qc.stopChan)
+	log.Printf("[consumer:%v] stopped consuming", qc.Name)
 }

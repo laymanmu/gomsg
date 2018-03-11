@@ -5,34 +5,34 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"time"
+
+	"github.com/laymanmu/gomsg"
 )
 
 func main() {
-	config := NewQueueConfig("hello")
-	consumer := NewQueueConsumer(config)
+	config := gomsg.NewQueueConfig("hello")
+	consumer := gomsg.NewQueueConsumer(config)
 
-	go consumer.Consume(func(message *Message) {
-		log.Printf("callback got a message: %v", message)
-	})
+	callback := func(m *gomsg.Message) error {
+		log.Printf("callback got a message: %v", m)
+		// returning an error will stop the consumer:
+		return nil
+	}
+
+	go consumer.Start(callback)
 
 	iterations := 3
 	for i := 0; i < iterations; i++ {
 		log.Printf("iteration %v", i)
-		failOnError(consumer.Error, "consumer failed")
+		if consumer.Error != nil {
+			log.Fatalf("%v", consumer.Error)
+		}
 		time.Sleep(3 * time.Second)
 	}
 
-	consumer.Shutdown()
-	time.Sleep(2 * time.Second)
-}
-
-func failOnError(err error, msg string) {
-	if err != nil {
-		log.Fatalf("%s: %s", msg, err)
-		panic(fmt.Sprintf("%s: %s", msg, err))
-	}
+	consumer.Stop()
+	time.Sleep(1 * time.Second)
 }
 ```
