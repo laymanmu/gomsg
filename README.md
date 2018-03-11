@@ -1,0 +1,2 @@
+# gomsg
+go messaging
