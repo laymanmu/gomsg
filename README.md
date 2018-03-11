@@ -1,4 +1,4 @@
-# gomessage
+# gomsg
 
 ### Example RabbitMQ queue consumer:
 ```golang
