@@ -1,7 +1,10 @@
 package gomsg
 
 import (
+	"encoding/json"
+
 	"github.com/streadway/amqp"
+	"github.com/twinj/uuid"
 )
 
 // Message model.
@@ -22,5 +25,27 @@ func NewMessage(d amqp.Delivery) *Message {
 		Payload:       d.Body,
 		CorrelationID: d.CorrelationId,
 		AppID:         d.AppId,
-		ContentType:   d.ContentType}
+		ContentType:   d.ContentType,
+	}
+}
+
+// CreateMessage creates a message from the given parms.
+func CreateMessage(correlationID string, appID string, messageType string, contentType string, payload []byte) *Message {
+	return &Message{
+		ID:            uuid.NewV4().String(),
+		CorrelationID: correlationID,
+		AppID:         appID,
+		Type:          messageType,
+		ContentType:   contentType,
+		Payload:       payload,
+	}
+}
+
+// JSON returns a json string for this message.
+func (m *Message) JSON() string {
+	j, err := json.Marshal(m)
+	if err != nil {
+		return err.Error()
+	}
+	return string(j)
 }

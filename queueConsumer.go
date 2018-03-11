@@ -82,7 +82,7 @@ func (qc *QueueConsumer) consume(callback OnMessageCallback) {
 
 	go func() {
 		for delivery := range messageChan {
-			log.Printf("[consumer:%v] received delivery: %v", qc.Name, delivery)
+			log.Printf("[consumer:%v] received delivery with correlationId: %v", qc.Name, delivery.CorrelationId)
 			err := callback(NewMessage(delivery))
 			if err != nil {
 				log.Printf("[consumer:%v] stopping per caught an error from the callback: %v", qc.Name, err)
